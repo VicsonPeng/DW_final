@@ -79,13 +79,15 @@ require_once __DIR__ . '/navbar.php';
                 <?php if ($product['auction_type'] === 'auction' && count($bidHistory) > 0): ?>
                 <div class="chart-container">
                     <h3 class="chart-title">📈 價格走勢</h3>
-                    <canvas id="priceChart" height="200"></canvas>
+                    <div class="chart-wrapper" style="position: relative; height: 200px; width: 100%;">
+                        <canvas id="priceChart"></canvas>
+                    </div>
                 </div>
                 <?php endif; ?>
 
                 <!-- 留言板 -->
                 <div class="comments-section">
-                    <h2 class="section-title">💬 問與答 (<?php echo count($bidHistory); ?>)</h2>
+                    <h2 class="section-title">💬 問與答</h2>
                     
                     <div class="comment-list" id="comment-list">
                         <!-- 動態載入 -->
@@ -120,12 +122,17 @@ require_once __DIR__ . '/navbar.php';
                                 (<?php echo $sellerRating['total_reviews']; ?> 則評價)
                             </span>
                         </div>
-                        <?php if (isLoggedIn() && getCurrentUserId() !== $product['seller_id']): ?>
-                        <button class="btn btn-sm btn-outline" onclick="event.preventDefault(); openChat(<?php echo $product['seller_id']; ?>)">
-                            私訊賣家
-                        </button>
-                        <?php endif; ?>
                     </a>
+                    <?php if (isLoggedIn() && getCurrentUserId() !== $product['seller_id']): ?>
+                    <div class="seller-actions">
+                        <button class="btn btn-sm btn-outline" onclick="openChat(<?php echo $product['seller_id']; ?>)">
+                            💬 私訊賣家
+                        </button>
+                        <button class="btn btn-sm btn-secondary" id="follow-btn" onclick="toggleFollow(<?php echo $product['seller_id']; ?>)">
+                            ❤️ 關注賣家
+                        </button>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <!-- 競標面板 -->
@@ -145,19 +152,21 @@ require_once __DIR__ . '/navbar.php';
                         <?php endif; ?>
                     </div>
 
-                    <!-- 倒數計時 -->
-                    <?php if ($product['status'] === 'active'): ?>
-                    <div class="countdown-display" id="countdown-container">
-                        <div class="countdown-label">⏱️ 剩餘時間</div>
-                        <div class="countdown-timer" id="countdown-timer" data-end="<?php echo $product['end_time']; ?>">
-                            --:--:--
+                    <!-- 倒數計時（僅競標商品） -->
+                    <?php if ($product['auction_type'] === 'auction'): ?>
+                        <?php if ($product['status'] === 'active'): ?>
+                        <div class="countdown-display" id="countdown-container">
+                            <div class="countdown-label">⏱️ 剩餘時間</div>
+                            <div class="countdown-timer" id="countdown-timer" data-end="<?php echo $product['end_time']; ?>">
+                                --:--:--
+                            </div>
                         </div>
-                    </div>
-                    <?php else: ?>
-                    <div class="countdown-display ended">
-                        <div class="countdown-label">拍賣狀態</div>
-                        <div class="countdown-timer text-danger">已結束</div>
-                    </div>
+                        <?php else: ?>
+                        <div class="countdown-display ended">
+                            <div class="countdown-label">拍賣狀態</div>
+                            <div class="countdown-timer text-danger">已結束</div>
+                        </div>
+                        <?php endif; ?>
                     <?php endif; ?>
 
                     <!-- 出價表單 -->
@@ -205,11 +214,47 @@ require_once __DIR__ . '/navbar.php';
                         </div>
                         <?php else: ?>
                         <!-- 直購/專屬模式 -->
+                        <?php 
+                        $stock = $product['stock'] ?? 1;
+                        $isSoldOut = ($stock <= 0);
+                        ?>
                         <div class="buy-now-section">
-                            <button class="btn btn-primary btn-lg btn-block" onclick="buyNow()">
-                                💰 立即購買 - $<?php echo number_format($product['current_price'], 2); ?>
-                            </button>
-                            <p class="form-hint text-center mt-2">點擊後將直接購買此商品</p>
+                            <?php if ($isSoldOut): ?>
+                            <!-- 已售完 -->
+                            <div class="sold-out-notice">
+                                <span class="sold-out-badge">🚫 已售完</span>
+                                <p class="text-muted mt-2">此商品目前已售完</p>
+                            </div>
+                            <?php else: ?>
+                            <!-- 庫存資訊 -->
+                            <div class="stock-info">
+                                <span class="stock-label">庫存數量：</span>
+                                <span class="stock-value" id="stock-count"><?php echo $stock; ?></span>
+                            </div>
+                            
+                            <!-- 數量選擇 -->
+                            <div class="quantity-selector">
+                                <label>購買數量：</label>
+                                <div class="quantity-control">
+                                    <button type="button" class="quantity-btn" onclick="changeQuantity(-1)">-</button>
+                                    <input type="number" id="buy-quantity" value="1" min="1" max="<?php echo $stock; ?>" readonly>
+                                    <button type="button" class="quantity-btn" onclick="changeQuantity(1)">+</button>
+                                </div>
+                            </div>
+                            
+                            <div class="buy-buttons">
+                                <button class="btn btn-secondary btn-lg" onclick="addToCart()">
+                                    🛒 加入購物車
+                                </button>
+                                <button class="btn btn-primary btn-lg" onclick="buyNow()">
+                                    💰 立即購買
+                                </button>
+                            </div>
+                            <?php endif; ?>
+                            <p class="price-display">$<?php echo number_format($product['current_price'], 2); ?></p>
+                            <?php if (!$isSoldOut): ?>
+                            <p class="form-hint text-center mt-2">可加入購物車稍後結帳，或直接購買</p>
+                            <?php endif; ?>
                         </div>
                         <?php endif; ?>
                     <?php elseif (!isLoggedIn()): ?>
@@ -551,6 +596,259 @@ require_once __DIR__ . '/navbar.php';
         order: -1;
     }
 }
+
+/* 賣家操作按鈕 */
+.seller-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+/* 購買按鈕區 */
+.buy-buttons {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.buy-buttons .btn {
+    flex: 1;
+}
+
+.price-display {
+    text-align: center;
+    font-family: var(--font-display);
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--accent-gold);
+    margin: 8px 0;
+}
+
+/* 庫存資訊與數量選擇器 */
+.stock-info {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--border-radius-sm);
+}
+
+.stock-label {
+    color: var(--text-muted);
+}
+
+.stock-value {
+    font-weight: 600;
+    color: var(--accent-green);
+}
+
+.quantity-selector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.quantity-selector label {
+    color: var(--text-secondary);
+}
+
+.quantity-selector .quantity-control {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.quantity-selector .quantity-btn {
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-radius: var(--border-radius-sm);
+    cursor: pointer;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.quantity-selector .quantity-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-gold);
+}
+
+.quantity-selector input {
+    width: 50px;
+    text-align: center;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-radius: var(--border-radius-sm);
+    font-weight: 600;
+}
+
+.sold-out-notice {
+    text-align: center;
+    padding: 24px;
+    background: rgba(239, 68, 68, 0.1);
+    border-radius: var(--border-radius-sm);
+    margin-bottom: 12px;
+}
+
+.sold-out-badge {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent-red);
+}
+
+/* 關注按鈕狀態 */
+#follow-btn.following {
+    background: var(--accent-red);
+    border-color: var(--accent-red);
+}
+
+/* 圖表容器固定高度 */
+.chart-wrapper {
+    position: relative;
+    height: 200px !important;
+    max-height: 200px !important;
+    width: 100%;
+    overflow: hidden;
+}
+
+.chart-wrapper canvas {
+    max-height: 200px !important;
+}
+
+/* 樹狀留言 Reddit 風格 */
+.comment-item {
+    position: relative;
+    padding: 12px 0;
+}
+
+.comment-item.reply-comment {
+    border-left: 2px solid var(--border-color);
+    padding-left: 16px;
+}
+
+.comment-main {
+    display: flex;
+    gap: 12px;
+}
+
+.comment-avatar {
+    width: 36px;
+    height: 36px;
+    background: var(--gradient-blue);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.comment-avatar.seller-avatar {
+    background: var(--gradient-gold);
+    color: #000;
+}
+
+.comment-content {
+    flex: 1;
+}
+
+.comment-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.comment-author {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.seller-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    background: var(--accent-gold);
+    color: #000;
+    border-radius: 4px;
+    font-weight: 700;
+}
+
+.comment-time {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.comment-text {
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 8px;
+}
+
+.reply-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0;
+}
+
+.reply-btn:hover {
+    color: var(--accent-blue);
+}
+
+.reply-form-container {
+    display: none;
+    gap: 8px;
+    margin-top: 8px;
+    align-items: center;
+}
+
+.reply-input {
+    flex: 1;
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.reply-input:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.comment-replies {
+    margin-top: 8px;
+}
+
+.comment-form {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.comment-form input {
+    flex: 1;
+    padding: 12px 16px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    color: var(--text-primary);
+}
 </style>
 
 <script>
@@ -579,6 +877,12 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 載入留言
     loadComments();
+    
+    // 初始化關注狀態
+    initFollowStatus();
+    
+    // 更新購物車數量
+    updateCartBadge();
     
     // 開始即時更新
     setInterval(updateProductStatus, 3000);
@@ -628,6 +932,12 @@ function startCountdown() {
 function initPriceChart() {
     const canvas = document.getElementById('priceChart');
     if (!canvas) return;
+    
+    // 先銷毀舊圖表（防止重複創建）
+    if (priceChart) {
+        priceChart.destroy();
+        priceChart = null;
+    }
     
     fetch(`api.php?action=get_bid_history&product_id=${productId}`)
         .then(r => r.json())
@@ -828,11 +1138,32 @@ function setAutoBid() {
     });
 }
 
+// 數量控制
+const maxStock = <?php echo $product['stock'] ?? 1; ?>;
+
+function changeQuantity(delta) {
+    const input = document.getElementById('buy-quantity');
+    if (!input) return;
+    
+    let current = parseInt(input.value) || 1;
+    let newVal = current + delta;
+    
+    if (newVal < 1) newVal = 1;
+    if (newVal > maxStock) newVal = maxStock;
+    
+    input.value = newVal;
+}
+
 // 直接購買
 function buyNow() {
+    const quantityInput = document.getElementById('buy-quantity');
+    const quantity = quantityInput ? parseInt(quantityInput.value) || 1 : 1;
+    const price = <?php echo $product['current_price']; ?>;
+    const totalPrice = price * quantity;
+    
     Swal.fire({
         title: '確認購買',
-        html: `您即將購買此商品<br>金額將從您的餘額中扣除`,
+        html: `您即將購買 <strong>${quantity}</strong> 件商品<br>總金額：<strong>$${totalPrice.toLocaleString()}</strong><br>金額將從您的餘額中扣除`,
         icon: 'question',
         showCancelButton: true,
         confirmButtonText: '確認購買',
@@ -842,6 +1173,7 @@ function buyNow() {
             const formData = new FormData();
             formData.append('action', 'buy_now');
             formData.append('product_id', productId);
+            formData.append('quantity', quantity);
             
             fetch('api.php', {
                 method: 'POST',
@@ -853,7 +1185,7 @@ function buyNow() {
                     Swal.fire({
                         icon: 'success',
                         title: '購買成功！',
-                        text: '請前往會員中心填寫收貨資訊',
+                        text: '請前往填寫收貨資訊',
                         confirmButtonText: '前往'
                     }).then(() => {
                         location.href = 'checkout.php?order_id=' + data.order_id;
@@ -870,32 +1202,245 @@ function buyNow() {
     });
 }
 
-// 載入留言
+// 加入購物車
+function addToCart() {
+    const quantityInput = document.getElementById('buy-quantity');
+    const quantity = quantityInput ? parseInt(quantityInput.value) || 1 : 1;
+    
+    const formData = new FormData();
+    formData.append('action', 'add_to_cart');
+    formData.append('product_id', productId);
+    formData.append('quantity', quantity);
+    
+    fetch('api.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            Swal.fire({
+                icon: 'success',
+                title: '已加入購物車！',
+                showCancelButton: true,
+                confirmButtonText: '前往購物車',
+                cancelButtonText: '繼續逛逛'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    location.href = 'cart.php';
+                }
+            });
+            // 更新購物車 badge
+            updateCartBadge();
+        } else {
+            Swal.fire({
+                icon: 'error',
+                title: '加入失敗',
+                text: data.message
+            });
+        }
+    });
+}
+
+// 更新購物車 badge
+function updateCartBadge() {
+    fetch('api.php?action=get_cart_count')
+        .then(r => r.json())
+        .then(data => {
+            const badge = document.getElementById('cart-count');
+            if (badge && data.count > 0) {
+                badge.textContent = data.count;
+                badge.style.display = 'inline-flex';
+            } else if (badge) {
+                badge.style.display = 'none';
+            }
+        });
+}
+
+// 關注/取消關注賣家
+let isFollowing = false;
+const sellerId = <?php echo $product['seller_id']; ?>;
+
+function toggleFollow(sellerId) {
+    const action = isFollowing ? 'unfollow_seller' : 'follow_seller';
+    const formData = new FormData();
+    formData.append('action', action);
+    formData.append('seller_id', sellerId);
+    
+    fetch('api.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            isFollowing = !isFollowing;
+            updateFollowButton();
+            Swal.fire({
+                icon: 'success',
+                title: isFollowing ? '已關注賣家' : '已取消關注',
+                timer: 1500,
+                showConfirmButton: false
+            });
+        } else {
+            Swal.fire({
+                icon: 'error',
+                title: '操作失敗',
+                text: data.message
+            });
+        }
+    });
+}
+
+function updateFollowButton() {
+    const btn = document.getElementById('follow-btn');
+    if (btn) {
+        if (isFollowing) {
+            btn.innerHTML = '💔 取消關注';
+            btn.classList.add('following');
+        } else {
+            btn.innerHTML = '❤️ 關注賣家';
+            btn.classList.remove('following');
+        }
+    }
+}
+
+// 初始化關注狀態
+function initFollowStatus() {
+    fetch(`api.php?action=get_follow_status&seller_id=${sellerId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                isFollowing = data.following;
+                updateFollowButton();
+            }
+        });
+}
+
+// 載入留言 (樹狀結構)
+const sellerIdForProduct = <?php echo $product['seller_id']; ?>;
+
 function loadComments() {
     fetch(`api.php?action=get_comments&product_id=${productId}`)
         .then(r => r.json())
         .then(data => {
             const container = document.getElementById('comment-list');
             if (data.success && data.comments.length > 0) {
-                container.innerHTML = data.comments.map(comment => `
-                    <div class="comment-item">
-                        <div class="comment-avatar">${comment.username.charAt(0).toUpperCase()}</div>
-                        <div class="comment-content">
-                            <div class="comment-header">
-                                <span class="comment-author">${escapeHtml(comment.username)}</span>
-                                <span class="comment-time">${timeAgo(comment.created_at)}</span>
-                            </div>
-                            <div class="comment-text">${escapeHtml(comment.content)}</div>
-                        </div>
-                    </div>
-                `).join('');
+                // 建立樹狀結構
+                const commentTree = buildCommentTree(data.comments);
+                container.innerHTML = renderCommentTree(commentTree, 0);
             } else {
-                container.innerHTML = '<p class="text-muted text-center p-3">尚無留言</p>';
+                container.innerHTML = '<p class="text-muted text-center p-3">尚無留言，快來提問吧！</p>';
             }
         });
 }
 
-// 發送留言
+// 建立留言樹
+function buildCommentTree(comments) {
+    const map = {};
+    const roots = [];
+    
+    // 先建立 ID -> comment 的映射
+    comments.forEach(c => {
+        c.children = [];
+        map[c.id] = c;
+    });
+    
+    // 建立父子關係
+    comments.forEach(c => {
+        if (c.parent_id && map[c.parent_id]) {
+            map[c.parent_id].children.push(c);
+        } else {
+            roots.push(c);
+        }
+    });
+    
+    return roots;
+}
+
+// 渲染留言樹
+function renderCommentTree(comments, depth) {
+    if (!comments || comments.length === 0) return '';
+    
+    return comments.map(comment => {
+        const isSeller = parseInt(comment.user_id) === sellerIdForProduct;
+        const sellerBadge = isSeller ? '<span class="seller-badge">賣家</span>' : '';
+        const depthClass = depth > 0 ? 'reply-comment' : '';
+        const canReply = <?php echo isLoggedIn() ? 'true' : 'false'; ?>;
+        
+        return `
+            <div class="comment-item ${depthClass}" data-id="${comment.id}" style="margin-left: ${depth * 24}px;">
+                <div class="comment-thread-line"></div>
+                <div class="comment-main">
+                    <div class="comment-avatar ${isSeller ? 'seller-avatar' : ''}">${comment.username.charAt(0).toUpperCase()}</div>
+                    <div class="comment-content">
+                        <div class="comment-header">
+                            <span class="comment-author">${escapeHtml(comment.username)}</span>
+                            ${sellerBadge}
+                            <span class="comment-time">${timeAgo(comment.created_at)}</span>
+                        </div>
+                        <div class="comment-text">${escapeHtml(comment.content)}</div>
+                        ${canReply ? `<button class="reply-btn" onclick="showReplyForm(${comment.id})">↩️ 回覆</button>` : ''}
+                        <div class="reply-form-container" id="reply-form-${comment.id}" style="display: none;">
+                            <input type="text" class="reply-input" id="reply-input-${comment.id}" placeholder="輸入回覆...">
+                            <button class="btn btn-sm btn-primary" onclick="submitReply(${comment.id})">發送</button>
+                            <button class="btn btn-sm btn-secondary" onclick="hideReplyForm(${comment.id})">取消</button>
+                        </div>
+                    </div>
+                </div>
+                ${comment.children.length > 0 ? `<div class="comment-replies">${renderCommentTree(comment.children, depth + 1)}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+// 顯示回覆表單
+function showReplyForm(commentId) {
+    // 先隱藏所有其他回覆表單
+    document.querySelectorAll('.reply-form-container').forEach(el => el.style.display = 'none');
+    document.getElementById('reply-form-' + commentId).style.display = 'flex';
+    document.getElementById('reply-input-' + commentId).focus();
+}
+
+// 隱藏回覆表單
+function hideReplyForm(commentId) {
+    document.getElementById('reply-form-' + commentId).style.display = 'none';
+}
+
+// 發送回覆
+function submitReply(parentId) {
+    const input = document.getElementById('reply-input-' + parentId);
+    const content = input.value.trim();
+    
+    if (!content) return;
+    
+    const formData = new FormData();
+    formData.append('action', 'add_comment');
+    formData.append('product_id', productId);
+    formData.append('content', content);
+    formData.append('parent_id', parentId);
+    
+    fetch('api.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            input.value = '';
+            hideReplyForm(parentId);
+            loadComments();
+        } else {
+            Swal.fire({
+                icon: 'error',
+                title: '發送失敗',
+                text: data.message
+            });
+        }
+    });
+}
+
+// 發送頂層留言
 function submitComment(e) {
     e.preventDefault();
     const input = document.getElementById('comment-input');

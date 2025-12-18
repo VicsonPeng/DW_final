@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS products (
     current_price DECIMAL(15, 2) NOT NULL COMMENT '當前最高價',
     min_increment DECIMAL(15, 2) DEFAULT 10.00 COMMENT '最低加價金額',
     
+    -- 庫存數量 (直購/專屬商品用)
+    stock INT DEFAULT 1 COMMENT '庫存數量',
+    
     -- 專屬買家(private模式用)
     allowed_buyer_id INT DEFAULT NULL COMMENT '私人拍賣指定買家ID',
     
@@ -69,8 +72,8 @@ CREATE TABLE IF NOT EXISTS products (
     end_time TIMESTAMP NOT NULL COMMENT '結束時間(可因Soft Close延長)',
     original_end_time TIMESTAMP NOT NULL COMMENT '原始結束時間',
     
-    -- 狀態
-    status ENUM('active', 'ended', 'sold', 'cancelled') DEFAULT 'active',
+    -- 狀態 (新增 sold_out 狀態)
+    status ENUM('active', 'ended', 'sold', 'sold_out', 'cancelled') DEFAULT 'active',
     winner_id INT DEFAULT NULL COMMENT '得標者ID',
     
     -- 統計
@@ -272,6 +275,35 @@ CREATE TABLE IF NOT EXISTS activities (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
+-- 10. 購物車表 (cart)
+-- ============================================
+CREATE TABLE IF NOT EXISTS cart (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    product_id INT NOT NULL,
+    quantity INT DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_product (user_id, product_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================
+-- 11. 關注表 (follows)
+-- ============================================
+CREATE TABLE IF NOT EXISTS follows (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    follower_id INT NOT NULL,
+    seller_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (follower_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_follow (follower_id, seller_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================
 -- 插入測試用戶資料
 -- ============================================
 INSERT INTO users (username, email, password_hash, balance) VALUES
@@ -283,11 +315,10 @@ INSERT INTO users (username, email, password_hash, balance) VALUES
 -- ============================================
 -- 插入測試商品資料
 -- ============================================
-INSERT INTO products (seller_id, title, description, image_url, auction_type, starting_price, current_price, min_increment, end_time, original_end_time, category) VALUES
-(2, '稀有古董懷錶 - 1920年代瑞士製', '這是一款極為罕見的1920年代瑞士製古董懷錶，保存狀態極佳，機芯運作正常。附原廠盒子與證書。', 'https://images.unsplash.com/photo-1509048191080-d2984bad6ae5?w=400', 'auction', 5000.00, 5000.00, 100.00, DATE_ADD(NOW(), INTERVAL 2 HOUR), DATE_ADD(NOW(), INTERVAL 2 HOUR), 'antique'),
-(2, '限量版藝術畫作 - 城市夜景', '知名藝術家親筆簽名限量版印刷畫作，編號 23/100，含精美木質框。', 'https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=400', 'auction', 3000.00, 3000.00, 50.00, DATE_ADD(NOW(), INTERVAL 4 HOUR), DATE_ADD(NOW(), INTERVAL 4 HOUR), 'art'),
-(2, 'MacBook Pro 16吋 M3 Max', '全新未拆封 MacBook Pro 16吋，M3 Max晶片，36GB RAM，1TB SSD。提供完整保固。', 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=400', 'fixed', 89000.00, 89000.00, 0.00, DATE_ADD(NOW(), INTERVAL 30 DAY), DATE_ADD(NOW(), INTERVAL 30 DAY), 'electronics'),
-(2, 'VIP專屬收藏品', '此為專屬會員限定商品，僅限指定買家購買。', 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=400', 'private', 15000.00, 15000.00, 0.00, DATE_ADD(NOW(), INTERVAL 7 DAY), DATE_ADD(NOW(), INTERVAL 7 DAY), 'exclusive');
+INSERT INTO products (seller_id, title, description, image_url, auction_type, starting_price, current_price, min_increment, end_time, original_end_time, category, stock) VALUES
+(2, '稀有古董懷錶 - 1920年代瑞士製', '這是一款極為罕見的1920年代瑞士製古董懷錶，保存狀態極佳，機芯運作正常。附原廠盒子與證書。', 'https://images.unsplash.com/photo-1509048191080-d2984bad6ae5?w=400', 'auction', 5000.00, 5000.00, 100.00, DATE_ADD(NOW(), INTERVAL 2 HOUR), DATE_ADD(NOW(), INTERVAL 2 HOUR), 'antique', 1),
+(2, '限量版藝術畫作 - 城市夜景', '知名藝術家親筆簽名限量版印刷畫作，編號 23/100，含精美木質框。', 'https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=400', 'auction', 3000.00, 3000.00, 50.00, DATE_ADD(NOW(), INTERVAL 4 HOUR), DATE_ADD(NOW(), INTERVAL 4 HOUR), 'art', 1),
+(2, 'MacBook Pro 16吋 M3 Max', '全新未拆封 MacBook Pro 16吋，M3 Max晶片，36GB RAM，1TB SSD。提供完整保固。', 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=400', 'fixed', 89000.00, 89000.00, 0.00, DATE_ADD(NOW(), INTERVAL 30 DAY), DATE_ADD(NOW(), INTERVAL 30 DAY), 'electronics', 5);
 
 -- 設定專屬商品的指定買家
 UPDATE products SET allowed_buyer_id = 1 WHERE id = 4;

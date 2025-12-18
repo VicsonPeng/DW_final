@@ -9,6 +9,9 @@
 require_once __DIR__ . '/functions.php';
 initSession();
 
+// 處理已結束的拍賣（建立訂單、通知得標者）
+processEndedAuctions();
+
 $currentUser = getCurrentUser();
 $isLoggedIn = isLoggedIn();
 ?>
@@ -24,6 +27,10 @@ $isLoggedIn = isLoggedIn();
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- SweetAlert2 CDN -->
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- Flatpickr CDN for date picker -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@400;500;700&display=swap" rel="stylesheet">
     
@@ -66,13 +73,13 @@ $isLoggedIn = isLoggedIn();
                     上架商品
                 </a>
                 <a href="dashboard.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) === 'dashboard.php' ? 'active' : ''; ?>">
-                    <span class="nav-icon">📊</span>
+                    <span class="nav-icon">⚙️</span>
                     會員中心
                 </a>
-                <a href="chat.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) === 'chat.php' ? 'active' : ''; ?>">
-                    <span class="nav-icon">💬</span>
-                    訊息
-                    <span class="unread-badge" id="unread-count" style="display: none;">0</span>
+                <a href="cart.php" class="nav-link <?php echo basename($_SERVER['PHP_SELF']) === 'cart.php' ? 'active' : ''; ?>">
+                    <span class="nav-icon">🛒</span>
+                    購物車
+                    <span class="cart-badge" id="cart-count" style="display: none;">0</span>
                 </a>
                 <?php endif; ?>
             </div>
@@ -109,10 +116,10 @@ $isLoggedIn = isLoggedIn();
                                 <span>👤</span> 我的檔案
                             </a>
                             <a href="dashboard.php">
-                                <span>📊</span> 會員中心
+                                <span>⚙️</span> 會員中心
                             </a>
-                            <a href="dashboard.php#mining">
-                                <span>⛏️</span> 資金挖礦
+                            <a href="chat.php">
+                                <span>💬</span> 私訊
                             </a>
                             <hr>
                             <a href="#" onclick="logout(); return false;" class="logout-link">
@@ -140,7 +147,7 @@ $isLoggedIn = isLoggedIn();
         <a href="index.php">🏠 商城大廳</a>
         <?php if ($isLoggedIn): ?>
         <a href="sell.php">📤 上架商品</a>
-        <a href="dashboard.php">📊 會員中心</a>
+        <a href="dashboard.php">⚙️ 會員中心</a>
         <a href="chat.php">💬 訊息</a>
         <a href="#" onclick="logout(); return false;">🚪 登出</a>
         <?php else: ?>
@@ -280,6 +287,7 @@ $isLoggedIn = isLoggedIn();
         .then(r => r.json())
         .then(data => {
             if (data.success) {
+                closeModal('login-modal');
                 Swal.fire({
                     icon: 'success',
                     title: '登入成功！',
@@ -320,6 +328,7 @@ $isLoggedIn = isLoggedIn();
         .then(r => r.json())
         .then(data => {
             if (data.success) {
+                closeModal('register-modal');
                 Swal.fire({
                     icon: 'success',
                     title: '註冊成功！',

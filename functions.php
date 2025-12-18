@@ -575,3 +575,155 @@ function getSellerRating(int $sellerId): array {
         'one_star' => (int)$result['one_star']
     ];
 }
+
+// ============================================
+// 競標結算處理
+// ============================================
+
+/**
+ * 處理已結束的拍賣（建立訂單、通知得標者）
+ * 應在頁面載入時呼叫
+ */
+function processEndedAuctions(): void {
+    global $pdo;
+    
+    try {
+        // 找出所有已過期但尚未處理的拍賣商品
+        $stmt = $pdo->prepare("
+            SELECT p.*, u.username as seller_name
+            FROM products p
+            JOIN users u ON p.seller_id = u.id
+            WHERE p.auction_type = 'auction' 
+              AND p.status = 'active' 
+              AND p.end_time < NOW()
+              AND p.bid_count > 0
+        ");
+        $stmt->execute();
+        $endedAuctions = $stmt->fetchAll();
+        
+        foreach ($endedAuctions as $auction) {
+            processAuctionWinner($auction);
+        }
+        
+        // 將無出價的過期拍賣標記為已結束
+        $stmt = $pdo->prepare("
+            UPDATE products 
+            SET status = 'ended' 
+            WHERE auction_type = 'auction' 
+              AND status = 'active' 
+              AND end_time < NOW() 
+              AND bid_count = 0
+        ");
+        $stmt->execute();
+        
+    } catch (Exception $e) {
+        error_log("processEndedAuctions error: " . $e->getMessage());
+    }
+}
+
+/**
+ * 處理單一拍賣的得標者
+ * @param array $auction
+ */
+function processAuctionWinner(array $auction): void {
+    global $pdo;
+    
+    try {
+        $pdo->beginTransaction();
+        
+        // 鎖定商品
+        $stmt = $pdo->prepare("SELECT * FROM products WHERE id = ? FOR UPDATE");
+        $stmt->execute([$auction['id']]);
+        $product = $stmt->fetch();
+        
+        // 再次檢查狀態（避免重複處理）
+        if (!$product || $product['status'] !== 'active') {
+            $pdo->rollBack();
+            return;
+        }
+        
+        // 取得最高出價者
+        $highestBid = getHighestBid($auction['id']);
+        if (!$highestBid) {
+            // 無出價，標記為結束
+            $stmt = $pdo->prepare("UPDATE products SET status = 'ended' WHERE id = ?");
+            $stmt->execute([$auction['id']]);
+            $pdo->commit();
+            return;
+        }
+        
+        $winnerId = (int)$highestBid['bidder_id'];
+        $finalPrice = (float)$highestBid['amount'];
+        
+        // 計算費用
+        $platformFee = $finalPrice * 0.05;
+        $sellerReceived = $finalPrice - $platformFee;
+        
+        // 更新商品狀態為已售出
+        $stmt = $pdo->prepare("
+            UPDATE products SET status = 'sold', winner_id = ? WHERE id = ?
+        ");
+        $stmt->execute([$winnerId, $auction['id']]);
+        
+        // 更新出價狀態為得標
+        $stmt = $pdo->prepare("
+            UPDATE bids SET status = 'won' 
+            WHERE product_id = ? AND bidder_id = ? AND status = 'active'
+        ");
+        $stmt->execute([$auction['id'], $winnerId]);
+        
+        // 轉移資金（從凍結金額扣除到賣家）
+        $stmt = $pdo->prepare("
+            UPDATE users SET frozen_balance = frozen_balance - ? WHERE id = ?
+        ");
+        $stmt->execute([$finalPrice, $winnerId]);
+        
+        $stmt = $pdo->prepare("
+            UPDATE users SET balance = balance + ? WHERE id = ?
+        ");
+        $stmt->execute([$sellerReceived, $auction['seller_id']]);
+        
+        // 建立訂單
+        $stmt = $pdo->prepare("
+            INSERT INTO orders 
+            (product_id, buyer_id, seller_id, final_price, platform_fee, seller_received, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'paid')
+        ");
+        $stmt->execute([
+            $auction['id'], $winnerId, $auction['seller_id'],
+            $finalPrice, $platformFee, $sellerReceived
+        ]);
+        $orderId = $pdo->lastInsertId();
+        
+        // 發送得標通知給買家
+        $message = "🎉 恭喜您得標！您成功標得商品【{$auction['title']}】，成交價格為 $" . number_format($finalPrice, 2) . "。請前往訂單頁面填寫收貨資訊。";
+        $stmt = $pdo->prepare("
+            INSERT INTO messages (sender_id, receiver_id, content, product_id)
+            VALUES (?, ?, ?, ?)
+        ");
+        $stmt->execute([$auction['seller_id'], $winnerId, $message, $auction['id']]);
+        
+        // 發送通知給賣家
+        $stmt = $pdo->prepare("SELECT username FROM users WHERE id = ?");
+        $stmt->execute([$winnerId]);
+        $winnerName = $stmt->fetchColumn();
+        
+        $sellerMessage = "🔔 您的商品【{$auction['title']}】已由 {$winnerName} 得標，成交價格為 $" . number_format($finalPrice, 2) . "。等待買家填寫收貨資訊。";
+        $stmt = $pdo->prepare("
+            INSERT INTO messages (sender_id, receiver_id, content, product_id)
+            VALUES (?, ?, ?, ?)
+        ");
+        $stmt->execute([$winnerId, $auction['seller_id'], $sellerMessage, $auction['id']]);
+        
+        // 記錄活動
+        logActivity('sale', $winnerId, $auction['id'], 
+            "{$winnerName} 得標了 {$auction['title']}", $finalPrice);
+        
+        $pdo->commit();
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("processAuctionWinner error: " . $e->getMessage());
+    }
+}
+

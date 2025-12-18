@@ -60,7 +60,7 @@ require_once __DIR__ . '/navbar.php';
             </div>
 
             <!-- 上架表單 -->
-            <form id="sell-form" class="sell-form" onsubmit="submitProduct(event)">
+            <form id="sell-form" class="sell-form" onsubmit="submitProduct(event)" enctype="multipart/form-data">
                 <input type="hidden" id="auction-type" name="auction_type" value="auction">
 
                 <!-- 基本資訊 -->
@@ -92,7 +92,9 @@ require_once __DIR__ . '/navbar.php';
                             </select>
                         </div>
                         <div class="form-group">
-                            <label>商品圖片網址</label>
+                            <label>商品圖片</label>
+                            <input type="file" id="image" name="image" accept="image/*">
+                            <p class="form-hint">或輸入圖片網址：</p>
                             <input type="url" id="image_url" name="image_url" 
                                    placeholder="https://example.com/image.jpg">
                         </div>
@@ -119,6 +121,12 @@ require_once __DIR__ . '/navbar.php';
                                 <input type="number" id="min_increment" name="min_increment" 
                                        min="1" step="0.01" value="10" placeholder="10.00">
                             </div>
+                        </div>
+                        <div class="form-group" id="stock-group" style="display: none;">
+                            <label>庫存數量</label>
+                            <input type="number" id="stock" name="stock" 
+                                   min="1" value="1" placeholder="1">
+                            <p class="form-hint">直購商品的庫存數量，售完將顯示為 Sold Out</p>
                         </div>
                     </div>
                 </div>
@@ -163,6 +171,11 @@ require_once __DIR__ . '/navbar.php';
                                 <span class="duration-unit">天</span>
                             </div>
                         </label>
+                    </div>
+                    
+                    <div class="form-group mt-3" id="custom-time-group">
+                        <label>或自訂結束時間</label>
+                        <input type="text" id="end_time" name="end_time" placeholder="點擊選擇日期時間" class="flatpickr-input">
                     </div>
                 </div>
 
@@ -398,6 +411,7 @@ function selectAuctionType(type) {
     const incrementGroup = document.getElementById('increment-group');
     const durationSection = document.getElementById('duration-section');
     const privateSection = document.getElementById('private-section');
+    const stockGroup = document.getElementById('stock-group');
     const priceLabel = document.getElementById('price-label');
     
     switch (type) {
@@ -405,22 +419,25 @@ function selectAuctionType(type) {
             incrementGroup.style.display = 'block';
             durationSection.style.display = 'block';
             privateSection.style.display = 'none';
+            stockGroup.style.display = 'none';
             priceLabel.textContent = '起標價格 ';
             document.getElementById('allowed_buyer_id').removeAttribute('required');
             break;
             
         case 'fixed':
             incrementGroup.style.display = 'none';
-            durationSection.style.display = 'block';
+            durationSection.style.display = 'none';  // 直購無期限
             privateSection.style.display = 'none';
+            stockGroup.style.display = 'block';  // 顯示庫存
             priceLabel.textContent = '售價 ';
             document.getElementById('allowed_buyer_id').removeAttribute('required');
             break;
             
         case 'private':
             incrementGroup.style.display = 'none';
-            durationSection.style.display = 'block';
+            durationSection.style.display = 'none';  // 專屬無期限
             privateSection.style.display = 'block';
+            stockGroup.style.display = 'block';  // 顯示庫存
             priceLabel.textContent = '售價 ';
             document.getElementById('allowed_buyer_id').setAttribute('required', 'required');
             break;
@@ -512,6 +529,27 @@ function submitProduct(e) {
 // 初始化
 document.addEventListener('DOMContentLoaded', function() {
     selectAuctionType('auction');
+    
+    // 初始化 Flatpickr 日曆選擇器
+    if (typeof flatpickr !== 'undefined') {
+        flatpickr('#end_time', {
+            enableTime: true,
+            dateFormat: 'Y-m-d H:i',
+            minDate: 'today',
+            time_24hr: true,
+            locale: {
+                firstDayOfWeek: 1,
+                weekdays: {
+                    shorthand: ['日', '一', '二', '三', '四', '五', '六'],
+                    longhand: ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+                },
+                months: {
+                    shorthand: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
+                    longhand: ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月']
+                }
+            }
+        });
+    }
 });
 </script>
 

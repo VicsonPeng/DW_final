@@ -103,6 +103,7 @@ require_once __DIR__ . '/navbar.php';
             <button class="tab" onclick="switchTab('products')">📦 我的商品</button>
             <button class="tab" onclick="switchTab('bids')">🔥 出價紀錄</button>
             <button class="tab" onclick="switchTab('orders')">📋 訂單</button>
+            <button class="tab" onclick="switchTab('follows')">❤️ 關注</button>
         </div>
 
         <!-- 錢包 -->
@@ -122,6 +123,22 @@ require_once __DIR__ . '/navbar.php';
                         <span class="stat-value"><?php echo formatMoney($currentUser['total_bid_amount']); ?></span>
                     </div>
                 </div>
+            </div>
+            
+            <!-- 測試儲值 -->
+            <div class="deposit-section mt-4">
+                <h3>💳 測試儲值</h3>
+                <form onsubmit="handleDeposit(event)" class="deposit-form">
+                    <div class="form-row">
+                        <div class="input-with-prefix">
+                            <span class="input-prefix">$</span>
+                            <input type="number" id="deposit-amount" name="amount" 
+                                   min="1" max="1000000" step="0.01" placeholder="輸入金額" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">儲值</button>
+                    </div>
+                    <p class="form-hint">此為測試功能，可直接增加帳戶餘額</p>
+                </form>
             </div>
             
             <div class="achievement-progress mt-4">
@@ -210,16 +227,48 @@ require_once __DIR__ . '/navbar.php';
             <?php if (count($myProducts) > 0): ?>
             <div class="product-grid">
                 <?php foreach ($myProducts as $product): ?>
-                <div class="product-card-mini" onclick="location.href='product.php?id=<?php echo $product['id']; ?>'">
-                    <img src="<?php echo h($product['image_url'] ?: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300'); ?>" 
-                         class="product-card-image">
-                    <div class="product-card-body">
-                        <span class="badge <?php echo $product['status'] === 'active' ? 'badge-auction' : 'badge-ended'; ?>">
-                            <?php echo $product['status'] === 'active' ? '進行中' : '已結束'; ?>
+                <div class="product-card-mini product-card-editable">
+                    <div class="card-image-container" onclick="location.href='product.php?id=<?php echo $product['id']; ?>'">
+                        <img src="<?php echo h($product['image_url'] ?: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300'); ?>" 
+                             class="product-card-image">
+                        <?php
+                        $statusBadge = match($product['status']) {
+                            'active' => ['badge-auction', '進行中'],
+                            'sold' => ['badge-sold', '已售出'],
+                            'sold_out' => ['badge-ended', '已售完'],
+                            'cancelled' => ['badge-ended', '已下架'],
+                            default => ['badge-ended', '已結束']
+                        };
+                        ?>
+                        <span class="badge product-status-badge <?php echo $statusBadge[0]; ?>">
+                            <?php echo $statusBadge[1]; ?>
                         </span>
+                    </div>
+                    <div class="product-card-body">
                         <h4><?php echo h($product['title']); ?></h4>
                         <p class="product-card-price"><?php echo formatMoney($product['current_price']); ?></p>
-                        <p class="text-muted"><?php echo $product['bid_count']; ?> 次出價</p>
+                        <div class="product-meta">
+                            <?php if ($product['auction_type'] !== 'auction'): ?>
+                            <span class="stock-label">庫存: <?php echo $product['stock'] ?? 1; ?></span>
+                            <?php else: ?>
+                            <span class="bid-label"><?php echo $product['bid_count']; ?> 次出價</span>
+                            <?php endif; ?>
+                        </div>
+                        <div class="product-card-actions">
+                            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); showEditProductModal(<?php echo htmlspecialchars(json_encode([
+                                'id' => $product['id'],
+                                'title' => $product['title'],
+                                'description' => $product['description'] ?? '',
+                                'current_price' => $product['current_price'],
+                                'stock' => $product['stock'] ?? 1,
+                                'auction_type' => $product['auction_type'],
+                                'bid_count' => $product['bid_count'],
+                                'status' => $product['status']
+                            ]), ENT_QUOTES, 'UTF-8'); ?>)">✏️ 編輯</button>
+                            <?php if ($product['status'] === 'active' && ($product['auction_type'] !== 'auction' || $product['bid_count'] == 0)): ?>
+                            <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteProduct(<?php echo $product['id']; ?>)">🗑️ 下架</button>
+                            <?php endif; ?>
+                        </div>
                     </div>
                 </div>
                 <?php endforeach; ?>
@@ -329,8 +378,14 @@ require_once __DIR__ . '/navbar.php';
                             <div class="order-actions">
                                 <?php if (!$order['shipping_name']): ?>
                                 <a href="checkout.php?order_id=<?php echo $order['id']; ?>" class="btn btn-primary btn-sm">填寫收貨資訊</a>
-                                <?php elseif (!$order['is_reviewed'] && $order['status'] === 'completed'): ?>
-                                <button class="btn btn-secondary btn-sm" onclick="showReviewModal(<?php echo $order['id']; ?>)">撰寫評價</button>
+                                <?php elseif ($order['status'] === 'shipped'): ?>
+                                <button class="btn btn-success btn-sm" onclick="confirmReceived(<?php echo $order['id']; ?>)">📦 確認收貨</button>
+                                <?php elseif ($order['status'] === 'completed' && !$order['is_reviewed']): ?>
+                                <button class="btn btn-secondary btn-sm" onclick="showReviewModal(<?php echo $order['id']; ?>)">⭐ 撰寫評價</button>
+                                <?php elseif ($order['status'] === 'completed' && $order['is_reviewed']): ?>
+                                <span class="text-success">✅ 已評價</span>
+                                <?php elseif ($order['status'] === 'paid' && $order['shipping_name']): ?>
+                                <span class="text-muted">等待賣家發貨</span>
                                 <?php endif; ?>
                             </div>
                         </div>
@@ -380,6 +435,13 @@ require_once __DIR__ . '/navbar.php';
                                     <small><?php echo h($sale['shipping_phone']); ?></small><br>
                                     <small><?php echo h($sale['shipping_address']); ?></small>
                                 </div>
+                                <button class="btn btn-primary btn-sm mt-2" onclick="shipOrder(<?php echo $sale['id']; ?>)">📤 標記已發貨</button>
+                                <?php elseif ($sale['status'] === 'paid' && !$sale['shipping_name']): ?>
+                                <span class="text-muted">等待買家填寫收貨資訊</span>
+                                <?php elseif ($sale['status'] === 'shipped'): ?>
+                                <span class="text-info">📦 已發貨，等待買家確認收貨</span>
+                                <?php elseif ($sale['status'] === 'completed'): ?>
+                                <span class="text-success">✅ 訂單已完成</span>
                                 <?php endif; ?>
                             </div>
                         </div>
@@ -393,6 +455,32 @@ require_once __DIR__ . '/navbar.php';
                     <p class="empty-text">您還沒有賣出任何商品</p>
                 </div>
                 <?php endif; ?>
+            </div>
+        </div>
+
+        <!-- 關注 -->
+        <div class="tab-content" id="tab-follows">
+            <div class="order-tabs">
+                <button class="order-tab active" onclick="switchFollowTab('following')">我關注的</button>
+                <button class="order-tab" onclick="switchFollowTab('followers')">關注我的</button>
+            </div>
+            
+            <!-- 我關注的 -->
+            <div class="follow-content active" id="follows-following">
+                <div class="follow-list" id="following-list">
+                    <div class="loading">
+                        <div class="loading-spinner"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 關注我的 -->
+            <div class="follow-content" id="follows-followers">
+                <div class="follow-list" id="followers-list">
+                    <div class="loading">
+                        <div class="loading-spinner"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -421,6 +509,42 @@ require_once __DIR__ . '/navbar.php';
                 <textarea id="review-comment" rows="4" placeholder="分享您的購買體驗..."></textarea>
             </div>
             <button type="submit" class="btn btn-primary btn-block">提交評價</button>
+        </form>
+    </div>
+</div>
+
+<!-- 商品編輯模態框 -->
+<div class="modal-overlay" id="edit-product-modal">
+    <div class="modal">
+        <button class="modal-close" onclick="closeModal('edit-product-modal')">&times;</button>
+        <h2 class="modal-title">✏️ 編輯商品</h2>
+        <form onsubmit="submitProductEdit(event)">
+            <input type="hidden" id="edit-product-id" value="">
+            <input type="hidden" id="edit-product-type" value="">
+            <div class="form-group">
+                <label>商品標題 <span class="required">*</span></label>
+                <input type="text" id="edit-product-title" required minlength="5" maxlength="200">
+            </div>
+            <div class="form-group">
+                <label>商品描述</label>
+                <textarea id="edit-product-description" rows="4"></textarea>
+            </div>
+            <div class="form-group" id="edit-price-group">
+                <label>價格 <span class="required">*</span></label>
+                <div class="input-with-prefix">
+                    <span class="input-prefix">$</span>
+                    <input type="number" id="edit-product-price" min="1" step="0.01" required>
+                </div>
+                <p class="form-hint" id="price-warning" style="color: var(--accent-red); display: none;">
+                    ⚠️ 競標商品已有出價，無法修改價格
+                </p>
+            </div>
+            <div class="form-group" id="edit-stock-group">
+                <label>庫存數量</label>
+                <input type="number" id="edit-product-stock" min="0" value="1">
+                <p class="form-hint">直購/專屬商品的庫存數量</p>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">儲存變更</button>
         </form>
     </div>
 </div>
@@ -658,6 +782,54 @@ require_once __DIR__ . '/navbar.php';
     color: var(--accent-gold);
 }
 
+/* 商品卡片編輯樣式 */
+.product-card-editable {
+    cursor: default;
+}
+
+.product-card-editable .card-image-container {
+    position: relative;
+    cursor: pointer;
+}
+
+.product-status-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+}
+
+.product-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.product-meta .stock-label {
+    color: var(--accent-green);
+}
+
+.product-card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.product-card-actions .btn {
+    flex: 1;
+    font-size: 12px;
+    padding: 6px 10px;
+}
+
+.btn-danger {
+    background: var(--accent-red);
+    border-color: var(--accent-red);
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #dc2626;
+}
+
 /* 訂單標籤頁 */
 .order-tabs {
     display: flex;
@@ -789,11 +961,80 @@ require_once __DIR__ . '/navbar.php';
         flex-wrap: wrap;
     }
 }
+
+/* 關注列表 */
+.follow-content {
+    display: none;
+}
+
+.follow-content.active {
+    display: block;
+}
+
+.follow-list {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    min-height: 200px;
+}
+
+.follow-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.follow-item:last-child {
+    border-bottom: none;
+}
+
+.follow-user {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-primary);
+}
+
+.follow-avatar {
+    width: 40px;
+    height: 40px;
+    background: var(--gradient-purple);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 16px;
+}
+
+.follow-name {
+    font-weight: 500;
+}
+
+.follow-time {
+    font-size: 12px;
+    color: var(--text-muted);
+}
 </style>
 
 <script>
 // ============================================
 // 會員中心腳本
+// ============================================
+
+// 時間工具函數
+function timeAgo(datetime) {
+    const time = new Date(datetime).getTime();
+    const diff = Math.floor((Date.now() - time) / 1000);
+    
+    if (diff < 60) return '剛剛';
+    if (diff < 3600) return Math.floor(diff / 60) + ' 分鐘前';
+    if (diff < 86400) return Math.floor(diff / 3600) + ' 小時前';
+    if (diff < 604800) return Math.floor(diff / 86400) + ' 天前';
+    return new Date(datetime).toLocaleDateString();
+}
 // ============================================
 
 // 標籤頁切換
@@ -968,10 +1209,350 @@ function submitReview(e) {
     });
 }
 
+// 標記已發貨
+function shipOrder(orderId) {
+    Swal.fire({
+        title: '確認發貨',
+        text: '確定要標記此訂單為已發貨嗎？',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: '確認發貨',
+        cancelButtonText: '取消'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            const formData = new FormData();
+            formData.append('action', 'ship_order');
+            formData.append('order_id', orderId);
+            
+            fetch('api.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: '已標記發貨！',
+                        text: '買家已收到發貨通知',
+                        timer: 1500,
+                        showConfirmButton: false
+                    }).then(() => {
+                        location.reload();
+                    });
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: '操作失敗',
+                        text: data.message
+                    });
+                }
+            });
+        }
+    });
+}
+
+// 確認收貨
+function confirmReceived(orderId) {
+    Swal.fire({
+        title: '確認收貨',
+        text: '確定已收到商品嗎？確認後訂單將完成',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: '確認收貨',
+        cancelButtonText: '取消'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            const formData = new FormData();
+            formData.append('action', 'confirm_received');
+            formData.append('order_id', orderId);
+            
+            fetch('api.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: '訂單已完成！',
+                        text: '您現在可以為此訂單撰寫評價',
+                        confirmButtonText: '前往評價'
+                    }).then(() => {
+                        location.reload();
+                    });
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: '操作失敗',
+                        text: data.message
+                    });
+                }
+            });
+        }
+    });
+}
+
 // 初始化評分星星
 document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('#rating-stars .star').forEach(s => s.classList.add('active'));
 });
+
+// 處理儲值
+function handleDeposit(e) {
+    e.preventDefault();
+    
+    const amount = document.getElementById('deposit-amount').value;
+    const formData = new FormData();
+    formData.append('action', 'test_deposit');
+    formData.append('amount', amount);
+    
+    fetch('api.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            Swal.fire({
+                icon: 'success',
+                title: '儲值成功！',
+                text: data.message,
+                timer: 1500,
+                showConfirmButton: false
+            }).then(() => {
+                location.reload();
+            });
+        } else {
+            Swal.fire({
+                icon: 'error',
+                title: '儲值失敗',
+                text: data.message
+            });
+        }
+    });
+}
+
+// 切換關注子標籤
+function switchFollowTab(type) {
+    document.querySelectorAll('.follow-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('#tab-follows .order-tab').forEach(el => el.classList.remove('active'));
+    
+    document.getElementById('follows-' + type).classList.add('active');
+    event.target.classList.add('active');
+    
+    if (type === 'following') {
+        loadFollowing();
+    } else {
+        loadFollowers();
+    }
+}
+
+// 載入我關注的
+function loadFollowing() {
+    fetch('api.php?action=get_following')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('following-list');
+            if (data.success && data.following.length > 0) {
+                container.innerHTML = data.following.map(user => `
+                    <div class="follow-item">
+                        <a href="profile.php?id=${user.seller_id}" class="follow-user">
+                            <div class="follow-avatar">${user.username.charAt(0).toUpperCase()}</div>
+                            <span class="follow-name">${escapeHtml(user.username)}</span>
+                        </a>
+                        <button class="btn btn-sm btn-outline" onclick="unfollowUser(${user.seller_id})">取消關注</button>
+                    </div>
+                `).join('');
+            } else {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">❤️</div>
+                        <h3 class="empty-title">尚未關注任何賣家</h3>
+                        <p class="empty-text">去商品頁面關注您喜歡的賣家吧！</p>
+                    </div>
+                `;
+            }
+        });
+}
+
+// 載入關注我的
+function loadFollowers() {
+    fetch('api.php?action=get_followers')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('followers-list');
+            if (data.success && data.followers.length > 0) {
+                container.innerHTML = data.followers.map(user => `
+                    <div class="follow-item">
+                        <a href="profile.php?id=${user.follower_id}" class="follow-user">
+                            <div class="follow-avatar">${user.username.charAt(0).toUpperCase()}</div>
+                            <span class="follow-name">${escapeHtml(user.username)}</span>
+                        </a>
+                        <span class="follow-time">${timeAgo(user.created_at)}</span>
+                    </div>
+                `).join('');
+            } else {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">👥</div>
+                        <h3 class="empty-title">尚無人關注您</h3>
+                        <p class="empty-text">上架商品並積極互動來吸引關注！</p>
+                    </div>
+                `;
+            }
+        });
+}
+
+// 取消關注
+function unfollowUser(sellerId) {
+    const formData = new FormData();
+    formData.append('action', 'unfollow_seller');
+    formData.append('seller_id', sellerId);
+    
+    fetch('api.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            loadFollowing(); // 重新載入
+        }
+    });
+}
+
+// 初始化關注標籤
+document.addEventListener('DOMContentLoaded', function() {
+    // 如果 hash 是 follows，載入資料
+    if (window.location.hash === '#follows') {
+        switchTab('follows');
+        loadFollowing();
+    }
+    
+    // 綁定關注標籤點擊事件，使其在首次點擊時載入資料
+    const followsTab = document.querySelector('.tab[onclick*="follows"]');
+    if (followsTab) {
+        followsTab.addEventListener('click', function() {
+            // 延遲載入以確保 tab 切換完成
+            setTimeout(loadFollowing, 100);
+        });
+    }
+});
+
+// 顯示商品編輯模態框
+function showEditProductModal(product) {
+    document.getElementById('edit-product-id').value = product.id;
+    document.getElementById('edit-product-type').value = product.auction_type;
+    document.getElementById('edit-product-title').value = product.title;
+    document.getElementById('edit-product-description').value = product.description;
+    document.getElementById('edit-product-price').value = product.current_price;
+    document.getElementById('edit-product-stock').value = product.stock;
+    
+    // 競標商品有出價時停用價格編輯
+    const priceInput = document.getElementById('edit-product-price');
+    const priceWarning = document.getElementById('price-warning');
+    
+    if (product.auction_type === 'auction' && product.bid_count > 0) {
+        priceInput.disabled = true;
+        priceWarning.style.display = 'block';
+    } else {
+        priceInput.disabled = false;
+        priceWarning.style.display = 'none';
+    }
+    
+    // 非直購商品隱藏庫存欄位
+    const stockGroup = document.getElementById('edit-stock-group');
+    if (product.auction_type === 'auction') {
+        stockGroup.style.display = 'none';
+    } else {
+        stockGroup.style.display = 'block';
+    }
+    
+    document.getElementById('edit-product-modal').classList.add('active');
+}
+
+// 提交商品編輯
+function submitProductEdit(e) {
+    e.preventDefault();
+    
+    const formData = new FormData();
+    formData.append('action', 'update_product');
+    formData.append('product_id', document.getElementById('edit-product-id').value);
+    formData.append('title', document.getElementById('edit-product-title').value);
+    formData.append('description', document.getElementById('edit-product-description').value);
+    formData.append('price', document.getElementById('edit-product-price').value);
+    formData.append('stock', document.getElementById('edit-product-stock').value);
+    
+    fetch('api.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            closeModal('edit-product-modal');
+            Swal.fire({
+                icon: 'success',
+                title: '更新成功！',
+                timer: 1500,
+                showConfirmButton: false
+            }).then(() => {
+                location.reload();
+            });
+        } else {
+            Swal.fire({
+                icon: 'error',
+                title: '更新失敗',
+                text: data.message
+            });
+        }
+    });
+}
+
+// 下架商品
+function deleteProduct(productId) {
+    Swal.fire({
+        title: '確定要下架此商品？',
+        text: '下架後商品將不再顯示在市場中',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: '確定下架',
+        cancelButtonText: '取消',
+        confirmButtonColor: '#ef4444'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            const formData = new FormData();
+            formData.append('action', 'delete_product');
+            formData.append('product_id', productId);
+            
+            fetch('api.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: '商品已下架',
+                        timer: 1500,
+                        showConfirmButton: false
+                    }).then(() => {
+                        location.reload();
+                    });
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: '下架失敗',
+                        text: data.message
+                    });
+                }
+            });
+        }
+    });
+}
 </script>
 
 <?php include __DIR__ . '/footer.php'; ?>
